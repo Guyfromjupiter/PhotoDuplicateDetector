@@ -15,94 +15,85 @@ namespace PhotoDuplicateDetector
 
         public static void Main(string[] args)
         {
-            // Get the path to the directory or file to process from the user.
-            GetNumberOfInputPaths();
             InputPath.Clear();
             ImagePath.Clear();
-            HashLayer.hashMap.Clear();
+            SHA256HashLayer.hashMap.Clear();
+            // Get the path to the directory or file to process from the user.
+
+            GetNumberOfInputPaths();
+            
+            
             foreach (string path in InputPath)
             {
                 GetImagePaths(path);
             }
-            HashLayer.Sub1();
+            Console.WriteLine($"Total images found: {ImageScanner.GetData().Count}");
+
+            SHA256HashLayer.Sub1();
+
+            Console.WriteLine("Press Enter to exit...");
+            Console.ReadLine();
         }
-        
+
         public static void GetNumberOfInputPaths()
         {
-            Console.WriteLine("how many paths do you want to scan?");
-            string? NumPathsInput = Console.ReadLine();
-
-            //check if the user inpout is empty or have white space
-            if (string.IsNullOrWhiteSpace(NumPathsInput))
+            while (true)
             {
-                Console.WriteLine("Input cannot be empty. Exiting.");
-                return;
-            }
-
-            // Convert the user input to an integer
-            if (!int.TryParse(NumPathsInput, out int numPaths) || numPaths < 1)
-            {
-                Console.WriteLine("Invalid number of paths. Exiting.");
-                return;
-            }
-
-            for (int i = 0; i < numPaths; i++)
-            {
-                Console.WriteLine("Enter target directory or file path:");
+                Console.WriteLine("How many paths do you want to scan?");
                 string? input = Console.ReadLine();
-                if (string.IsNullOrWhiteSpace(input))
+
+                if (int.TryParse(input, out int numPaths) && numPaths > 0)
                 {
-                    Console.WriteLine("Input cannot be empty. Please enter a valid path.");
-                    i--;
-                    continue;
+                    for (int i = 0; i < numPaths; i++)
+                    {
+                        Console.WriteLine("Enter target directory or file path:");
+                        string? path = Console.ReadLine();
+
+                        if (!string.IsNullOrWhiteSpace(path))
+                            InputPath.Add(path);
+                        else
+                            i--; // retry
+                    }
+                    break;
                 }
-                InputPath.Add(input);
+
+                Console.WriteLine("Invalid input. Try again.");
             }
         }
 
-
-        public static void GetImagePaths(string rootPath)
+        public static void GetImagePaths(string path)
         {
-            //for single file
-            if (File.Exists(rootPath))
+            if (File.Exists(path))
             {
-                ProcessFile(rootPath);
-                return;
+                // This path is a file
+                ProcessFile(path);
             }
-
-            //for invalid path
-            if (!Directory.Exists(rootPath))
+            else if (Directory.Exists(path))
             {
-                Console.WriteLine($"Invalid path: {rootPath}");
-                return;
+                // This path is a directory
+                ProcessDirectory(path);
             }
-
-            //for directory
-            Stack<string> dirs = new Stack<string>();
-            dirs.Push(rootPath);
-
-            while (dirs.Count > 0)
+            else
             {
-                string currentDir = dirs.Pop();
-
-                try
-                {
-                    foreach (var file in Directory.EnumerateFiles(currentDir))
-                        ProcessFile(file);
-
-                    foreach (var dir in Directory.EnumerateDirectories(currentDir))
-                        dirs.Push(dir);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error processing directory {currentDir}: {ex.Message}");
-                }
+                Console.WriteLine("{0} is not a valid file or directory.", path);
             }
         }
 
 
+        // Process all files in the directory passed in, recurse on any directories 
+        // that are found, and process the files they contain.
+        public static void ProcessDirectory(string targetDirectory)
+        {
+            // Process the list of files found in the directory.
+            string[] fileEntries = Directory.GetFiles(targetDirectory);
+            foreach (string fileName in fileEntries)
+                ProcessFile(fileName);
 
-
+            // Recurse into subdirectories of this directory.
+            string[] subdirectoryEntries = Directory.GetDirectories(targetDirectory);
+            foreach (string subdirectory in subdirectoryEntries)
+                ProcessDirectory(subdirectory);
+        }
 
         // Insert logic for processing found files here.
         public static void ProcessFile(string path)
