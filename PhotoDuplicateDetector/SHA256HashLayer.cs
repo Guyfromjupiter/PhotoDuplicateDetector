@@ -14,7 +14,8 @@ namespace PhotoDuplicateDetector
     {
 
         internal static Dictionary<string, List<string>> hashMap = new Dictionary<string, List<string>>();
-
+        private static List<String> duplicate = new List<String>();
+        private static List<string> NoExactDuplicate  = new List<string>();
         public static void Sub1()
         {
             int count = 0;
@@ -23,11 +24,12 @@ namespace PhotoDuplicateDetector
             {
                 count++;
                 if (count % 100 == 0)
+                {
                     Console.WriteLine($"Hashed {count} images...");
-
+                }
                 string? hash = ComputeSha256Hash(path);
                 if (hash == null) continue;
-
+                //we use hashmap concept here
                 if (!hashMap.TryGetValue(hash, out var list))
                 {
                     list = new List<string>();
@@ -89,14 +91,35 @@ namespace PhotoDuplicateDetector
                     foreach (var path in record.Value)
                     {
                         Console.WriteLine($" - {path}");
+                        
                     }
+                    duplicate.AddRange(record.Value);
                 }
 
             }
+            RemoveDuplicate();
             if (!duplicateFound)
             {
                 Console.WriteLine("No duplicates found.");
             }
+        }
+        public static void RemoveDuplicate()
+        {
+            var duplicateSet = new HashSet<string>(duplicate);
+            NoExactDuplicate.Clear();
+            foreach (string path in ImageScanner.GetData())
+            {
+                if (!duplicateSet.Contains(path))
+                    NoExactDuplicate.Add(path);
+            }
+        }
+        public static List<string> GetDuplidata()
+        {
+            return duplicate;
+        }
+        public static List<string> GetNoExactDuplidata()
+        {
+            return NoExactDuplicate;
         }
     }
 }

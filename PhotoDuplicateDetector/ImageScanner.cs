@@ -2,6 +2,7 @@
 // For File.Exists, Directory.Exists
 
 using System.Collections;
+using System.Drawing;
 using System.Security.Cryptography.X509Certificates;
 
 namespace PhotoDuplicateDetector
@@ -12,12 +13,16 @@ namespace PhotoDuplicateDetector
         //this list will store every image path
         private static List<string> ImagePath = new List<string>();
         private static List<string> InputPath = new List<string>();
+        internal static Dictionary<string, ulong> ImageDct = new Dictionary<string, ulong>();
 
         public static void Main(string[] args)
         {
             InputPath.Clear();
             ImagePath.Clear();
             SHA256HashLayer.hashMap.Clear();
+            SHA256HashLayer.GetNoExactDuplidata().Clear();
+            SHA256HashLayer.GetDuplidata().Clear();
+            PerceptualHashing.ImageHammingDis.Clear();
             // Get the path to the directory or file to process from the user.
 
             GetNumberOfInputPaths();
@@ -27,9 +32,31 @@ namespace PhotoDuplicateDetector
             {
                 GetImagePaths(path);
             }
-            Console.WriteLine($"Total images found: {ImageScanner.GetData().Count}");
+
+            Console.WriteLine($"Total images found: {ImagePath.Count}");
 
             SHA256HashLayer.Sub1();
+
+            Console.WriteLine($"Total images found when duplicate are removed: {SHA256HashLayer.GetNoExactDuplidata().Count}");
+            PerceptualHashing.InitCosTable();
+            int count = 0;
+            foreach (string path in SHA256HashLayer.GetNoExactDuplidata())
+            {
+                count++;
+                if (count % 100 == 0)
+                {
+                    Console.WriteLine($"Hashed {count} images...");
+                }
+                using Bitmap res = PerceptualHashing.PhotoResizing(path);
+                double[,] gray = PerceptualHashing.GrayScalling(res);
+                double[,] dct = PerceptualHashing.DCT_2(gray);
+                ulong hash = PerceptualHashing.Phash(dct);
+                ImageDct[path] = hash;
+
+
+            }
+
+            PerceptualHashing.PhashCompare();
 
             Console.WriteLine("Press Enter to exit...");
             Console.ReadLine();
@@ -126,5 +153,6 @@ namespace PhotoDuplicateDetector
         {
             return ImagePath.AsReadOnly();
         }
+   
     }
 }
