@@ -2,7 +2,7 @@
 
 This is a tool I build which takes a folder pathh, checks for imagee file and thenn uses SHA256 and Phash to compare, the similar photos would be added into a new folder.
 
-##Features
+## Features
 - Getting Image paths and storring it in a list
 - SHA 256
 - Phash
@@ -11,12 +11,12 @@ This is a tool I build which takes a folder pathh, checks for imagee file and th
 - serialization of resize funtion
 - DCT II normalized version used for image processing
 
-##Dependacies
+## Dependacies
 - .NET 9.0
 - System.Drawing.Common (10.0.8) 
 - Window OS
 
-##NOTICE
+## NOTICE
 -this uses GDI+
 
 ## Installation
@@ -33,7 +33,7 @@ dotnet restore
 dotnet build
 ```
 
-##How this works
+## How this works
 - Image Scanner first ask how many directory you want to check similar image from and then takes the specified number of directory path in a list
 - it uses the direcory path and look into files and sub directory. for subdirectory i used recursion can be seen in ProcessDirectory(string targetDirectory) in ImageScanner file
 - IsImageFile(string) function checks extensions s only path we get is of image (IsImageFile is a functiion in ImageScanner)
@@ -56,3 +56,9 @@ dotnet build
 ## Contributing
 Pull requests are welcome.
 For major changes, open an issue first.
+
+
+## yapping 
+phash is hella slow, i did some optimization, its beetter you can do is have a pipeline
+SHA256 -> dhash -> ahash -> Phash
+i didn't i might because this is hella slow
