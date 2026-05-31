@@ -1,4 +1,4 @@
-#Photo Duplicate and similar detector
+# Photo Duplicate and similar detector
 
 This is a tool I build which takes a folder pathh, checks for imagee file and thenn uses SHA256 and Phash to compare, the similar photos would be added into a new folder.
 
