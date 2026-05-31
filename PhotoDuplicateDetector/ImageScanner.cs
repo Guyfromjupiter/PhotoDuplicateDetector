@@ -40,22 +40,29 @@ namespace PhotoDuplicateDetector
             Console.WriteLine($"Total images found when duplicate are removed: {SHA256HashLayer.GetNoExactDuplidata().Count}");
             PerceptualHashing.InitCosTable();
             int count = 0;
-            foreach (string path in SHA256HashLayer.GetNoExactDuplidata())
+
+            //this is where we will compute the perceptual hash for each image and store it in the ImageDct dictionary
+            //, we will also print out the progress every 100 images
+            Parallel.ForEach(SHA256HashLayer.GetNoExactDuplidata(), path =>
             {
-                count++;
-                if (count % 100 == 0)
+                ulong hash;
+                using (Bitmap res = PerceptualHashing.PhotoResizing(path))
                 {
-                    Console.WriteLine($"Hashed {count} images...");
+                    double[,] gray = PerceptualHashing.GrayScalling(res);
+                    double[,] dct = PerceptualHashing.DCT_2(gray);
+                    hash = PerceptualHashing.Phash(dct);
                 }
-                using Bitmap res = PerceptualHashing.PhotoResizing(path);
-                double[,] gray = PerceptualHashing.GrayScalling(res);
-                double[,] dct = PerceptualHashing.DCT_2(gray);
-                ulong hash = PerceptualHashing.Phash(dct);
-                ImageDct[path] = hash;
-
-
-            }
-
+                lock (ImageDct)
+                {
+                    ImageDct[path] = hash;
+                    count++;
+                    if (count % 100 == 0)
+                    {
+                        Console.WriteLine($"Hashed {count} images...");
+                    }
+                }
+            });
+            PerceptualHashing.CreateBuckets();
             PerceptualHashing.PhashCompare();
 
             Console.WriteLine("Press Enter to exit...");

@@ -24,20 +24,66 @@ namespace PhotoDuplicateDetector
         //we will try to creat our own pHash
         internal static Dictionary<string, int> ImageHammingDis = new Dictionary<string, int>();
         static double[,] cosTable = new double[32, 32];
+
+        //we will use buckets to store only the hash value that will be compared
+        //in the list we use a concept called tuple to store vale and hash togethe, tuple is compile time struc
+        //to add something in this list we add something like list.Add((path,hash))
+        //to access the value we can do something like list[0].path and list[0].hash
+        
+        internal static Dictionary<ushort, List<(string path, ulong hash)>> Buckets =
+            new Dictionary<ushort, List<(string path, ulong hash)>>();
+
+        /*
+         * had to change my resizing functionas it was calling new Bitmap(path) and GDI drawing API
+         * as we are using Parallel.ForEach in Main  multiiple  image are using this and may are being resized simultaneously
+         * well why did this happened? according to copilot and my understandind is that Bitmap constructor uses GDI+
+         * GDI is not used for concurent use hence it sucks when we are creating multiple bitmap or graphic obj in parallel
+         * this causes internal coruption or a corupted image causes it 
+         * 
+         * this is a defensive syc hack around GDI+
+         * 
+         * s_gdiLock is object used as lock s_ prefix is for static feild its naming convention
+         * s_gdiLock is a key that thread competee for, a lock object
+         * let say thread A enters lock => runtime checks if the any other thread has the key if not=> A runs or else => A sleep
+         * when computatuion of owner thread happens, the key is released and one thread wakes up
+         * 
+         * what lock does?
+         * lock(object)
+         * {
+         * 
+         * }
+         * 
+         * is same as 
+         * Monitor.Enter(obj);
+         * try
+         * {
+         *      DOWORK();
+         * }
+         * finally
+         * {
+         *      Monitor.Exit();
+         * }
+         * 
+         * why is lock necessary? because GDI+ is not thread safe 
+         * this makes so only single thread can enter.
+         * this is what you call serializzing, forrcing concurrent operation to run one afterother 
+         * so that means parallelism is lost inside lock but well what can we do?
+         * i would look into this later
+         */
+
+        private static readonly object s_gdiLock = new();
         [SupportedOSPlatform("windows6.1")]
         public static Bitmap PhotoResizing(string path)
         {
-            //resize the image to 32x32
-            using var image = new Bitmap(path);
-            var ResizedImage = new Bitmap(32, 32);
-
-            using (var g = Graphics.FromImage(ResizedImage))
+            lock (s_gdiLock)
             {
+                using var image = new Bitmap(path);
+                var resized = new Bitmap(32, 32);
+                using var g = Graphics.FromImage(resized);
                 g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
                 g.DrawImage(image, 0, 0, 32, 32);
-            }
-
-            return ResizedImage;
+                return resized;
+            }                   
         }
 
         //so the thing is in my previous version of dct, we are computing cos((2 * x + 1) * u * pi 
@@ -50,6 +96,7 @@ namespace PhotoDuplicateDetector
                         Math.Cos((2 * x + 1) * u * Math.PI / 64);
         }
         /*this is slower and older versionn which i used a little of my brain and callstack for
+         * 
          * [SupportedOSPlatform("windows6.1")]
         public static double[,] GreyScalling(Bitmap ResizedImage)
         {
@@ -143,13 +190,21 @@ namespace PhotoDuplicateDetector
          * 1/4 is a normalisation factor to make sure the values are between 0 and 1
          * its convention for jpeg
          */
+
+        /*so...we have to optimize hell out of this, phash i usually used for reverse search and for the purpose i am using its slow
+         * you can use dhash and ahash  and make a pieline which i might make if i want to.
+         * so here in DCT we have 2 optimization 
+         * cos  part is being many time so we compute it beforehand and store it in a 2d array
+         * the second optimization is the for nested loop, all for loop is going to 32 so how many times is it running? 32^4 = 1048576 times
+         * so we will exchange the first two for loop range to 8 because we only need 8*8 value for hash 8*8*32*32
+         */
         public static double[,] DCT_2(double[,] Pixels)
         {
             int N = 32;
             double[,] DCT = new double[N, N];
-            for (int u = 0; u < N; u++)
+            for (int u = 0; u < 8; u++)
             {
-                for (int v = 0; v < N; v++)
+                for (int v = 0; v < 8; v++)
                 {
                     double sum = 0.0;
                     for (int x = 0; x < N; x++)
@@ -238,24 +293,55 @@ namespace PhotoDuplicateDetector
             }
             return distance;
         }
+
+        /*
+       * the key idea is locality sensitive hashing
+       * 
+       * so we will see first 16 bit and if hash differs in first 16 bits then mlst likely they are different
+       * we will skip those 
+       * if they are same then we will compare hashing distance
+       * this will reduce the total amount of comparison we have to do and make it faster
+       * 
+       */
+        public static void CreateBuckets()
+        {
+            foreach(var record in ImageScanner.ImageDct)
+            {
+                ulong hash = record.Value;
+
+                //see we need 16 bit. The best way for it is to right shift 48 bit, so we will get 16 bits and hell lot of 0
+                //ushort wil be used because it can store 16 bit value and we will save memory
+
+                ushort bucketkey = (ushort)(hash >> 48);
+
+                //TryGetValue is a safe dictionary lookup method that returns false instead of exception if key not found
+                //out is interestin gone, this is a way to return value from the method, we can use it like this
+                //so befoore reeturning it will first write in list
+                //if statement checks if buketkey doesn't exist in dictionarry
+                //if it doesn't trgetvalue return false and the not operator will make it true 
+                //if-statement is true, we create a list and add it to the dictionary with the bucketkey as key
+                //or else if bucketkey already exist, we will get the list and add the path and hash to it
+
+                if (!Buckets.TryGetValue(bucketkey, out var list))
+                {
+                    list = new List<(string path, ulong hash)>();
+                    Buckets[bucketkey] = list;
+                }
+
+                list.Add((record.Key, hash));
+            }
+        }
         public static void PhashCompare()
         {
-            var list_to_fasten = ImageScanner.ImageDct.ToList();
-            for(int i = 0; i<list_to_fasten.Count();i++)
+            foreach (var bucket in Buckets.Values)
             {
-                for (int j = i + 1; j < list_to_fasten.Count(); j++)
+                for (int i = 0; i < bucket.Count; i++)
                 {
-                    int z = HammingDistance(list_to_fasten[i].Value, list_to_fasten[j].Value);
-                    ImageHammingDis.Add($"{list_to_fasten[i].Key} and {list_to_fasten[j].Key}", z);
-                }    
-                
-            }
-            foreach(var distance in ImageHammingDis)
-            {
-                Console.WriteLine($"{distance.Key} has a hamming distance of {distance.Value}");
-                if(distance.Value<=9)
-                {
-                    Console.WriteLine($"{distance.Key} are similar with a hamming distance of {distance.Value}");
+                    for (int j = i + 1; j < bucket.Count; j++)
+                    {
+                        int distance = HammingDistance(bucket[i].hash, bucket[j].hash);
+                        ImageHammingDis[$"{bucket[i].path} <-> {bucket[j].path}"] = distance;
+                    }
                 }
             }
         }
