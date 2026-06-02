@@ -9,6 +9,7 @@ namespace PhotoDuplicateDetector
 {
     public class ImageScanner
     {
+        //ImageScanner.RemoveDuplicate(source, duplicate, result);
         //hard coded list of image paths, the list is strictly of type string
         //this list will store every image path
         private static List<string> ImagePath = new List<string>();
@@ -22,7 +23,11 @@ namespace PhotoDuplicateDetector
             SHA256HashLayer.hashMap.Clear();
             SHA256HashLayer.GetNoExactDuplidata().Clear();
             SHA256HashLayer.GetDuplidata().Clear();
+            PerceptualHashing.GetPhashDuplidata().Clear();
             PerceptualHashing.ImageHammingDis.Clear();
+            PerceptualHashing.phash_Buckets.Clear();
+            dhash_Pipeline.Dhashdictionary.Clear();
+            dhash_Pipeline.GetdhashDuplidata().Clear();
             // Get the path to the directory or file to process from the user.
 
             GetNumberOfInputPaths();
@@ -38,33 +43,13 @@ namespace PhotoDuplicateDetector
             SHA256HashLayer.Sub1();
 
             Console.WriteLine($"Total images found when duplicate are removed: {SHA256HashLayer.GetNoExactDuplidata().Count}");
-            PerceptualHashing.InitCosTable();
-            int count = 0;
 
-            //this is where we will compute the perceptual hash for each image and store it in the ImageDct dictionary
-            //, we will also print out the progress every 100 images
-            Parallel.ForEach(SHA256HashLayer.GetNoExactDuplidata(), path =>
-            {
-                ulong hash;
-                using (Bitmap res = PerceptualHashing.PhotoResizing(path))
-                {
-                    double[,] gray = PerceptualHashing.GrayScalling(res);
-                    double[,] dct = PerceptualHashing.DCT_2(gray);
-                    hash = PerceptualHashing.Phash(dct);
-                }
-                lock (ImageDct)
-                {
-                    ImageDct[path] = hash;
-                    count++;
-                    if (count % 100 == 0)
-                    {
-                        Console.WriteLine($"Hashed {count} images...");
-                    }
-                }
-            });
-            PerceptualHashing.CreateBuckets();
-            PerceptualHashing.PhashCompare();
+            dhash_Pipeline.Sub2();
+            Console.WriteLine($"Total images found when duplicate are removed: {dhash_Pipeline.GetNoDhashExactDuplidata().Count}");
+            PerceptualHashing.phash_Buckets.Clear();
 
+            PerceptualHashing.Sub3();
+            Console.WriteLine($"Total images found when duplicate are removed: {PerceptualHashing.GetNoPhashExactDuplidata().Count}");
             Console.WriteLine("Press Enter to exit...");
             Console.ReadLine();
         }
@@ -156,10 +141,20 @@ namespace PhotoDuplicateDetector
 
 
         }
-        public static IReadOnlyList<string> GetData()
+        public static List<string> GetData()
         {
-            return ImagePath.AsReadOnly();
+            return ImagePath;
         }
-   
+        public static void RemoveDuplicate(List<string> SourceList,List<string> DuplicateList, List<string> NewList)
+        {
+            var duplicateSet = new HashSet<string>(DuplicateList);
+            NewList.Clear();
+            foreach (string path in SourceList)
+            {
+                if (!duplicateSet.Contains(path))
+                    NewList.Add(path);
+            }
+        }
+
     }
 }

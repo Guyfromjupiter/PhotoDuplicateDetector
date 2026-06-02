@@ -13,9 +13,10 @@ namespace PhotoDuplicateDetector
 {
     class PerceptualHashing
     {
-        /*perceptual hashing has four main things
-         * Resizing image
+        /*ALGORITHM TIME (a liittle change)
+         * perceptual hashing has four main things 
          * turning it to grayscale  
+         * resize
          * DCT (discrete cosine transform) to get the frequency of the image
          * perceptual hashing
          * hamming distance 
@@ -30,10 +31,12 @@ namespace PhotoDuplicateDetector
         //to add something in this list we add something like list.Add((path,hash))
         //to access the value we can do something like list[0].path and list[0].hash
         
-        internal static Dictionary<ushort, List<(string path, ulong hash)>> Buckets =
+        internal static Dictionary<ushort, List<(string path, ulong hash)>> phash_Buckets =
             new Dictionary<ushort, List<(string path, ulong hash)>>();
 
-        /*
+        private static List<String> Phash_duplicate = new List<String>();
+        private static List<string> NoPhashExactDuplicate = new List<string>();
+        /*THEORY TIME
          * had to change my resizing functionas it was calling new Bitmap(path) and GDI drawing API
          * as we are using Parallel.ForEach in Main  multiiple  image are using this and may are being resized simultaneously
          * well why did this happened? according to copilot and my understandind is that Bitmap constructor uses GDI+
@@ -70,22 +73,66 @@ namespace PhotoDuplicateDetector
          * so that means parallelism is lost inside lock but well what can we do?
          * i would look into this later
          */
+        public static void Sub3()
+        {
+            //this is where we will compute the perceptual hash for each image and store it in the ImageDct dictionary
+            //, we will also print out the progress every 100 images
+            InitCosTable();
+            int phash_count = 0;
+            var processedImages = new List<(string path, double[,] proImage)>();
+            foreach(var path in dhash_Pipeline.GetNoDhashExactDuplidata())
+            {
 
+                using Bitmap original = new Bitmap(path);
+                using Bitmap gray = GrayScalling1(original);   // ColorMatrix
+                using Bitmap resized = PhotoResizing(gray, 32, 32);
+                processedImages.Add((path, GrayScalling(resized)));
+            }
+            Parallel.ForEach(processedImages, path =>
+            {
+                double[,] dct = DCT_2(path.proImage);
+                ulong hash = Phash(dct);
+                lock (ImageScanner.ImageDct)
+                {
+                    ImageScanner.ImageDct[path.path] = hash;
+                    phash_count++;
+                    if (phash_count % 100 == 0)
+                    {
+                        Console.WriteLine($"Hashed {phash_count} images...");
+                    }
+                }
+            });
+            PhashCreateBuckets(ImageScanner.ImageDct, 52);
+            Compare(10,phash_Buckets,dhash_Pipeline.GetNoDhashExactDuplidata(), Phash_duplicate, NoPhashExactDuplicate);
+
+        }
         private static readonly object s_gdiLock = new();
         [SupportedOSPlatform("windows6.1")]
-        public static Bitmap PhotoResizing(string path)
+        public static Bitmap PhotoResizing(string path, int X, int Y)
         {
             lock (s_gdiLock)
             {
                 using var image = new Bitmap(path);
-                var resized = new Bitmap(32, 32);
+                var resized = new Bitmap(X, Y);
                 using var g = Graphics.FromImage(resized);
                 g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                g.DrawImage(image, 0, 0, 32, 32);
+                g.DrawImage(image, 0, 0, X, Y);
                 return resized;
             }                   
         }
-
+        [SupportedOSPlatform("windows6.1")]
+        public static Bitmap PhotoResizing(Bitmap og, int X, int Y)
+        {
+            lock (s_gdiLock)
+            {
+                using var image = og;
+                var resized = new Bitmap(X, Y);
+                using var g = Graphics.FromImage(resized);
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.DrawImage(image, 0, 0, X, Y);
+                return resized;
+            }
+        }
         //so the thing is in my previous version of dct, we are computing cos((2 * x + 1) * u * pi 
         //so we compute it beforehand and store it in 2d array
         public static void InitCosTable()
@@ -95,56 +142,68 @@ namespace PhotoDuplicateDetector
                     cosTable[x, u] =
                         Math.Cos((2 * x + 1) * u * Math.PI / 64);
         }
-        /*this is slower and older versionn which i used a little of my brain and callstack for
-         * 
-         * [SupportedOSPlatform("windows6.1")]
-        public static double[,] GreyScalling(Bitmap ResizedImage)
+
+        //this is slower and older versionn which i used a little of my brain and callstack for
+        [SupportedOSPlatform("windows6.1")]
+        public static Bitmap GrayScalling1(Bitmap OrignalImage)
         {
             //create a blank bitmap the same size as Resized Image
-            Bitmap newBitmap = new Bitmap(ResizedImage.Width, ResizedImage.Height);
+            Bitmap newBitmap = new Bitmap(OrignalImage.Width, OrignalImage.Height, PixelFormat.Format24bppRgb);
 
             //get a graphics object from the new image
-            Graphics g = Graphics.FromImage(newBitmap);
-
-            //create the grayscale ColorMatrix
-            ColorMatrix colorMatrix = new ColorMatrix(
-               new float[][]
-               {
+            using (Graphics g = Graphics.FromImage(newBitmap))
+            {
+                //create the grayscale ColorMatrix
+                ColorMatrix colorMatrix = new ColorMatrix(
+                   new float[][]
+                   {
                     [.2126f, .2126f, .2126f, 0, 0],
                     [.7152f, .7152f, .7152f, 0, 0],
                     [.0722f, .0722f, .0722f, 0, 0],
                     [0, 0, 0, 1, 0],
                     [0, 0, 0, 0, 1]
-               });
+                   });
 
-            //create some image attributes
-            ImageAttributes attributes = new ImageAttributes();
+                //create some image attributes
+                ImageAttributes attributes = new ImageAttributes();
 
-            //set the color matrix attribute
-            attributes.SetColorMatrix(colorMatrix);
+                //set the color matrix attribute
+                attributes.SetColorMatrix(colorMatrix);
 
-            //draw the original image on the new image
-            //using the grayscale color matrix
-            g.DrawImage(ResizedImage, new Rectangle(0, 0, ResizedImage.Width, ResizedImage.Height),
-               0, 0, ResizedImage.Width, ResizedImage.Height, GraphicsUnit.Pixel, attributes);
-
-            //dispose the Graphics object
-            g.Dispose();
-            double[,] Pixels = new double[32, 32];
-            for (int i = 0; i < newBitmap.Width; i++)
-            {
-                for (int j = 0; j < newBitmap.Height; j++)
-                {
-                    // Get the grayscale value from the Color object
-                    Color pixelColor = newBitmap.GetPixel(i, j);
-                    // Since the image is already grayscale, R, G, and B are equal
-                    Pixels[i, j] = pixelColor.R;
-                }
+                //draw the original image on the new image
+                //using the grayscale color matrix
+                g.DrawImage(OrignalImage, new Rectangle(0, 0, OrignalImage.Width, OrignalImage.Height),
+                   0, 0, OrignalImage.Width, OrignalImage.Height, GraphicsUnit.Pixel, attributes);
             }
-            return Pixels;
-        }*/
+
+            return newBitmap;
+        }
+
 
         //lockbits version
+
+        /*THEORY TIME
+         * lockbits is a method that locks pixel, bytes in bitmap  so gdi + cannot modify it
+         * lockbit return a bitmapdata struct with 
+         * 1>sccan0 => pointer to the first pixel data in the bitmap
+         * 2>stride => the number of bytes in a row of pixel data, including padding
+         * 3>pixel format => the format of the pixel data (e.g., 24bpp, 32bpp)
+         * 4>width and height => the dimensions of the bitmap
+         * 
+         * stride gives us the number of bytes in a row in the bitmap including padding, this is important as if we do 
+         * width * 3 for 24bpp we will get error as we not  accounting for padding
+         * 
+         * we also use Marshal.Copy to copy the pixel data from the bitmap to a byte array, this is because we cannot directly access the pixel data in the bitmap
+         * it is used to move data between unmmanaged and managed
+         * what photo can be visualised as
+         * |P P P P P pa|
+         * |P P P P P pa|
+         * |P P P P P pa|
+         * p can be thought as an array = {B G R}
+         * pa is padding 
+         * we have to unlock bits at the end or else we won't give power to GDI+ and also cause a memory leak
+         * this is faster than GetPixel for concurrent  process but slower than dirtly uusing unsafe code
+         */
         [SupportedOSPlatform("windows6.1")]
         public static double[,] GrayScalling (Bitmap bitmap)
         {
@@ -183,7 +242,7 @@ namespace PhotoDuplicateDetector
         }
 
         //we use dct 2 here, a normalised version off dct for image processing 
-        /*
+        /*THEORY TIME
          * c(u,v) = (1/4) * c(u) * c(v) * sum(x = 0 to x = N-1) sum(y = 0 to y = N-1) f(x,y) * cos((2 * x + 1) * u * pi / (2 * N)) * cos((2 * y + 1) * u * pi / (2 * N))
          * this is ifferent from thee mathematical version and will confuse you all so here is some thing i found out 
          * c(k) = { 1/ sqrt(2) if k = 0 , 1 K>0}
@@ -226,7 +285,7 @@ namespace PhotoDuplicateDetector
         }
 
         //phash is perceptual hashing
-        /*
+        /*THEORY TIME
          * "Looks like it" = https://www.hackerfactor.com/blog/?/archives/432-Looks-Like-It.html
          * the algorithm is as follows
          * step 1 resize the image to 32x32
@@ -303,16 +362,28 @@ namespace PhotoDuplicateDetector
        * this will reduce the total amount of comparison we have to do and make it faster
        * 
        */
-        public static void CreateBuckets()
+
+        /*
+         * bucket visualization (ushort 12)
+         * Buckets
+         * 110 001 101 100 = {image 1, image 2, image 3}
+         * 101 001 111 000 = {image 4, image 5}
+         * that just means that the first 12 bits of image 1,2,3 are same and are worth compariing 
+         * similarly for image 4 and 5, but image 1 and 4 are not worth comparing as they differ in first 12 bit
+         * the othe whose 12 bit are same are put in the same bucket and we only compare those in the same bucket
+         */
+        public static void PhashCreateBuckets(Dictionary<string , ulong> dic , int rightshift)
         {
-            foreach(var record in ImageScanner.ImageDct)
+            
+            phash_Buckets.Clear();
+            foreach (var record in dic)
             {
                 ulong hash = record.Value;
 
                 //see we need 16 bit. The best way for it is to right shift 48 bit, so we will get 16 bits and hell lot of 0
                 //ushort wil be used because it can store 16 bit value and we will save memory
 
-                ushort bucketkey = (ushort)(hash >> 48);
+                ushort bucketkey = (ushort)(hash >> rightshift);
 
                 //TryGetValue is a safe dictionary lookup method that returns false instead of exception if key not found
                 //out is interestin gone, this is a way to return value from the method, we can use it like this
@@ -322,17 +393,19 @@ namespace PhotoDuplicateDetector
                 //if-statement is true, we create a list and add it to the dictionary with the bucketkey as key
                 //or else if bucketkey already exist, we will get the list and add the path and hash to it
 
-                if (!Buckets.TryGetValue(bucketkey, out var list))
+                if (!phash_Buckets.TryGetValue(bucketkey, out var list))
                 {
                     list = new List<(string path, ulong hash)>();
-                    Buckets[bucketkey] = list;
+                    phash_Buckets[bucketkey] = list;
                 }
 
                 list.Add((record.Key, hash));
             }
         }
-        public static void PhashCompare()
+        public static void Compare(int threshold, Dictionary<ushort, List<(string path, ulong hash)>> Buckets, List<string> source, List<string> duplicate, List<string> result)
         {
+            duplicate.Clear();
+            
             foreach (var bucket in Buckets.Values)
             {
                 for (int i = 0; i < bucket.Count; i++)
@@ -340,10 +413,26 @@ namespace PhotoDuplicateDetector
                     for (int j = i + 1; j < bucket.Count; j++)
                     {
                         int distance = HammingDistance(bucket[i].hash, bucket[j].hash);
-                        ImageHammingDis[$"{bucket[i].path} <-> {bucket[j].path}"] = distance;
+                        if (distance <= threshold)
+                        {
+                            ImageHammingDis[$"{bucket[i].path} <-> {bucket[j].path}"] = distance;
+                            Console.WriteLine($"Possible duplicate found: {bucket[i].path} <-> {bucket[j].path}");
+                            duplicate.Add(bucket[j].path);
+                        }
                     }
-                }
+                }   
             }
+            ImageScanner.RemoveDuplicate(source, duplicate, result);
+
+
+        }
+        public static List<string> GetPhashDuplidata()
+        {
+            return Phash_duplicate;
+        }
+        public static List<string> GetNoPhashExactDuplidata()
+        {
+            return NoPhashExactDuplicate;
         }
     }
 }    
